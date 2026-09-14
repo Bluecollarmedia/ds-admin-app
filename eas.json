@@ -1,0 +1,44 @@
+{
+  "cli": {
+    "version": ">= 15.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_ADMIN_API_BASE_URL": "https://legendary-starburst-51f513.netlify.app",
+        "EXPO_PUBLIC_R2_PUBLIC_BASE_URL": "https://cdn.dsfoodreviews.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://kiobncqhchbgfxczrgmm.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtpb2JuY3FoY2hiZ2Z4Y3pyZ21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4ODUxODMsImV4cCI6MjA5OTQ2MTE4M30.s8qh5rY8oZOTfKccZtXQWr9cyOrVdSGi9d21SSRwoI8"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_ADMIN_API_BASE_URL": "https://legendary-starburst-51f513.netlify.app",
+        "EXPO_PUBLIC_R2_PUBLIC_BASE_URL": "https://cdn.dsfoodreviews.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://kiobncqhchbgfxczrgmm.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtpb2JuY3FoY2hiZ2Z4Y3pyZ21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4ODUxODMsImV4cCI6MjA5OTQ2MTE4M30.s8qh5rY8oZOTfKccZtXQWr9cyOrVdSGi9d21SSRwoI8"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_ADMIN_API_BASE_URL": "https://legendary-starburst-51f513.netlify.app",
+        "EXPO_PUBLIC_R2_PUBLIC_BASE_URL": "https://cdn.dsfoodreviews.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://kiobncqhchbgfxczrgmm.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtpb2JuY3FoY2hiZ2Z4Y3pyZ21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4ODUxODMsImV4cCI6MjA5OTQ2MTE4M30.s8qh5rY8oZOTfKccZtXQWr9cyOrVdSGi9d21SSRwoI8"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {}
+    }
+  }
+}
