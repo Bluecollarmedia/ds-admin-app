@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, V
 import { Pressable } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 
 import { Header } from '@/components/Header';
 import { adminFetch } from '@/lib/api';
@@ -46,6 +47,7 @@ function StatusBadge({ status }: { status: Review['status'] }) {
 }
 
 export function ReviewsScreen() {
+  const router = useRouter();
   const { data, loading, refreshing, error, refresh } = useAdminData<{ reviews: Review[] }>(
     '/api/admin/reviews'
   );
@@ -108,7 +110,20 @@ export function ReviewsScreen() {
 
   return (
     <View style={styles.root}>
-      <Header title="Reviews" />
+      <Header
+        title="Reviews"
+        right={
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push('/new-review');
+            }}
+            hitSlop={10}
+          >
+            <Text style={styles.newBtn}>+ New</Text>
+          </Pressable>
+        }
+      />
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
@@ -220,4 +235,5 @@ const styles = StyleSheet.create({
   actionText: { fontSize: 13, fontWeight: '700', color: colors.foreground },
   deleteText: { color: colors.primary },
   pressed: { opacity: 0.7 },
+  newBtn: { fontSize: 15, fontWeight: '800', color: colors.primary },
 });
