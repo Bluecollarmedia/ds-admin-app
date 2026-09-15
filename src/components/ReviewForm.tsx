@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -9,8 +9,10 @@ import { useRouter } from 'expo-router';
 import { Field, Chip, inputStyle } from './FormFields';
 import { LocationPicker } from './LocationPicker';
 import { NativeImageCropper } from './NativeImageCropper';
+import { CommentsPanel } from './CommentsPanel';
 import { adminFetch } from '@/lib/api';
 import { uploadToR2 } from '@/lib/upload';
+import { useAdminData } from '@/lib/useAdminData';
 import { colors } from '@/lib/theme';
 
 const CATEGORIES = ['Pizza', 'Dairy', 'Meat', 'Desserts', 'Drinks'];
@@ -49,6 +51,7 @@ export type ReviewDetail = {
   thirdReviewerThumbnailUrl?: string | null;
   thirdReviewerRating?: number;
   showBothScores?: boolean;
+  originalReviewSlug?: string;
   lat?: number;
   lng?: number;
   mapAddress?: string;
@@ -124,6 +127,16 @@ export function ReviewForm({ mode, initial }: { mode: 'create' | 'edit'; initial
     lng: initial?.lng,
     address: initial?.mapAddress,
   });
+
+  // Optional link to an earlier review (a revisit/follow-up).
+  const [originalReviewSlug, setOriginalReviewSlug] = useState(initial?.originalReviewSlug ?? '');
+  const [showLinkPicker, setShowLinkPicker] = useState(!!initial?.originalReviewSlug);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const { data: allReviewsData } = useAdminData<{ reviews: { slug: string; title: string }[] }>(
+    '/api/admin/reviews'
+  );
+  const pickableReviews = (allReviewsData?.reviews ?? []).filter((r) => r.slug !== initial?.slug);
+  const linkedTitle = pickableReviews.find((r) => r.slug === originalReviewSlug)?.title;
 
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState('');
@@ -262,6 +275,7 @@ export function ReviewForm({ mode, initial }: { mode: 'create' | 'edit'; initial
           : undefined,
         thirdReviewerRating: hasThird && thirdRating ? parseFloat(thirdRating) : undefined,
         showBothScores: hasSecond ? showBothScores : false,
+        originalReviewSlug: originalReviewSlug || undefined,
         lat: location.lat,
         lng: location.lng,
         mapAddress: location.address,
@@ -428,6 +442,39 @@ export function ReviewForm({ mode, initial }: { mode: 'create' | 'edit'; initial
           <TextInput value={description} onChangeText={setDescription} multiline placeholderTextColor={colors.muted} style={[inputStyle, styles.multiline]} />
         </Field>
 
+        {showLinkPicker ? (
+          <Field label="Follow-up to an earlier review?">
+            <Text style={styles.linkNote}>Pick the review this one revisits. Both pages will show a link between them.</Text>
+            <Pressable onPress={() => setPickerOpen(true)} style={styles.pickerBtn}>
+              <Text style={styles.pickerBtnText}>{linkedTitle ?? '— None (standalone review) —'}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setOriginalReviewSlug('');
+                setShowLinkPicker(false);
+              }}
+              style={{ marginTop: 6 }}
+            >
+              <Text style={styles.linkCancel}>Cancel</Text>
+            </Pressable>
+          </Field>
+        ) : (
+          <Pressable onPress={() => setShowLinkPicker(true)}>
+            <Text style={styles.linkToggle}>↩ Link this to an earlier review (a revisit) — optional</Text>
+          </Pressable>
+        )}
+
+        <ReviewPickerModal
+          visible={pickerOpen}
+          reviews={pickableReviews}
+          selectedSlug={originalReviewSlug}
+          onSelect={(slug) => {
+            setOriginalReviewSlug(slug);
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+
         <Field label={hasSecond ? `${reviewer || 'Main'}'s video & thumbnail` : 'Video & thumbnail'}>
           <MediaUploadFields
             media={main}
@@ -463,6 +510,8 @@ export function ReviewForm({ mode, initial }: { mode: 'create' | 'edit'; initial
             <Text style={styles.saveText}>{mode === 'create' ? 'Create Review' : 'Save Changes'}</Text>
           )}
         </Pressable>
+
+        {mode === 'edit' && initial?.slug && <CommentsPanel slug={initial.slug} />}
       </ScrollView>
     </>
   );
@@ -495,6 +544,56 @@ function ToggleField({
         {sub && <Text style={styles.toggleSub}>{sub}</Text>}
       </View>
     </Pressable>
+  );
+}
+
+function ReviewPickerModal({
+  visible,
+  reviews,
+  selectedSlug,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  reviews: { slug: string; title: string }[];
+  selectedSlug: string;
+  onSelect: (slug: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const filtered = reviews.filter((r) => r.title.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Pick a review to link</Text>
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search titles…"
+            placeholderTextColor={colors.muted}
+            style={[inputStyle, { marginTop: 10 }]}
+          />
+          <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+            <Pressable onPress={() => onSelect('')} style={styles.modalRow}>
+              <Text style={styles.modalRowText}>— None (standalone review) —</Text>
+            </Pressable>
+            {filtered.map((r) => (
+              <Pressable key={r.slug} onPress={() => onSelect(r.slug)} style={styles.modalRow}>
+                <Text style={[styles.modalRowText, r.slug === selectedSlug && styles.modalRowActive]} numberOfLines={1}>
+                  {r.title}
+                </Text>
+              </Pressable>
+            ))}
+            {filtered.length === 0 && <Text style={styles.modalEmpty}>No matching reviews.</Text>}
+          </ScrollView>
+          <Pressable onPress={onClose} style={styles.modalCloseBtn}>
+            <Text style={styles.modalCloseText}>Close</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -536,6 +635,21 @@ function MediaUploadFields({
 }
 
 const styles = StyleSheet.create({
+  linkToggle: { fontSize: 12, fontWeight: '600', color: colors.muted, textDecorationLine: 'underline' },
+  linkNote: { fontSize: 12, color: colors.muted },
+  linkCancel: { fontSize: 12, fontWeight: '600', color: colors.muted },
+  pickerBtn: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: colors.surface, marginTop: 4 },
+  pickerBtnText: { fontSize: 14, color: colors.foreground },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '75%' },
+  modalTitle: { fontSize: 17, fontWeight: '800', color: colors.foreground },
+  modalList: { marginTop: 12 },
+  modalRow: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  modalRowText: { fontSize: 14, color: colors.foreground },
+  modalRowActive: { color: colors.primary, fontWeight: '700' },
+  modalEmpty: { fontSize: 13, color: colors.muted, textAlign: 'center', paddingVertical: 20 },
+  modalCloseBtn: { marginTop: 12, alignItems: 'center', paddingVertical: 12, borderRadius: 999, borderWidth: 1, borderColor: colors.border },
+  modalCloseText: { fontSize: 14, fontWeight: '700', color: colors.foreground },
   body: { padding: 16, gap: 16, paddingBottom: 48 },
   two: { flexDirection: 'row', gap: 12 },
   flex1: { flex: 1 },

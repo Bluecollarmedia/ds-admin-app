@@ -6,6 +6,7 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 
 import { Header } from '@/components/Header';
+import { BackfillDurations } from '@/components/BackfillDurations';
 import { adminFetch } from '@/lib/api';
 import { useAdminData } from '@/lib/useAdminData';
 import { suggestedClimbTarget, randomClimbTarget } from '@/lib/viewFormat';
@@ -20,6 +21,8 @@ type Review = {
   categories: string[];
   status: 'published' | 'draft' | 'locked' | 'vault';
   videoKey?: string;
+  videoUrl?: string | null;
+  durationSeconds?: number;
   thumbnailUrl: string | null;
   realViews: number;
   displayViews?: number;
@@ -127,6 +130,10 @@ export function ReviewsScreen() {
     }
   }
 
+  const missingDurations = (data?.reviews ?? [])
+    .filter((r) => r.videoUrl && typeof r.durationSeconds !== 'number')
+    .map((r) => ({ slug: r.slug, videoUrl: r.videoUrl! }));
+
   return (
     <View style={styles.root}>
       <Header
@@ -160,6 +167,7 @@ export function ReviewsScreen() {
           keyExtractor={(r) => r.slug}
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
+          ListHeaderComponent={<BackfillDurations items={missingDurations} />}
           ListEmptyComponent={<Text style={styles.empty}>No reviews yet.</Text>}
           renderItem={({ item }) => (
             <View style={styles.card}>
