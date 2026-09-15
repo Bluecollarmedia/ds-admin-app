@@ -24,7 +24,12 @@ type Settings = {
   siteLockPasscode2: string;
   siteLockHint: string;
   requireApproval: boolean;
+  lockedSet: boolean;
+  vaultSet: boolean;
+  settingsSet: boolean;
 };
+
+type PassMode = 'keep' | 'change' | 'remove';
 
 const LOCK_OPTIONS: { value: Settings['siteLockMode']; label: string }[] = [
   { value: 'off', label: 'Off' },
@@ -41,6 +46,14 @@ export function SettingsScreen() {
   const [s, setS] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // Locked / Vault / Security passcodes — never shown, only Set/Change/Remove.
+  const [lockedMode, setLockedMode] = useState<PassMode>('keep');
+  const [vaultMode, setVaultMode] = useState<PassMode>('keep');
+  const [settingsMode, setSettingsMode] = useState<PassMode>('keep');
+  const [lockedValue, setLockedValue] = useState('');
+  const [vaultValue, setVaultValue] = useState('');
+  const [settingsValue, setSettingsValue] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,27 +93,55 @@ export function SettingsScreen() {
     setS((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
+  function passcodePayload(mode: PassMode, value: string): { include: boolean; value: string } {
+    if (mode === 'change' && value.trim()) return { include: true, value: value.trim() };
+    if (mode === 'remove') return { include: true, value: '' };
+    return { include: false, value: '' };
+  }
+
   async function save() {
     if (!s) return;
     setSaving(true);
     setSaved(false);
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const res = await adminFetch('/api/admin/settings', {
-      method: 'PUT',
-      body: JSON.stringify({
-        emailNotifications: s.emailNotifications,
-        notifyEmail: s.notifyEmail,
-        bannerMessage: s.bannerMessage,
-        bannerDuration: 'none',
-        siteLockMode: s.siteLockMode,
-        siteLockPasscode: s.siteLockPasscode,
-        siteLockPasscode2: s.siteLockPasscode2,
-        siteLockHint: s.siteLockHint,
-        requireApproval: s.requireApproval,
-      }),
-    });
+
+    const body: Record<string, unknown> = {
+      emailNotifications: s.emailNotifications,
+      notifyEmail: s.notifyEmail,
+      bannerMessage: s.bannerMessage,
+      bannerDuration: 'none',
+      siteLockMode: s.siteLockMode,
+      siteLockPasscode: s.siteLockPasscode,
+      siteLockPasscode2: s.siteLockPasscode2,
+      siteLockHint: s.siteLockHint,
+      requireApproval: s.requireApproval,
+    };
+    const locked = passcodePayload(lockedMode, lockedValue);
+    const vault = passcodePayload(vaultMode, vaultValue);
+    const security = passcodePayload(settingsMode, settingsValue);
+    if (locked.include) body.lockedPasscode = locked.value;
+    if (vault.include) body.vaultPasscode = vault.value;
+    if (security.include) body.settingsPasscode = security.value;
+
+    const res = await adminFetch('/api/admin/settings', { method: 'PUT', body: JSON.stringify(body) });
     setSaving(false);
     if (res.ok) {
+      setS((prev) =>
+        prev
+          ? {
+              ...prev,
+              lockedSet: lockedMode === 'change' ? true : lockedMode === 'remove' ? false : prev.lockedSet,
+              vaultSet: vaultMode === 'change' ? true : vaultMode === 'remove' ? false : prev.vaultSet,
+              settingsSet: settingsMode === 'change' ? true : settingsMode === 'remove' ? false : prev.settingsSet,
+            }
+          : prev
+      );
+      setLockedMode('keep');
+      setVaultMode('keep');
+      setSettingsMode('keep');
+      setLockedValue('');
+      setVaultValue('');
+      setSettingsValue('');
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     }
@@ -192,13 +233,46 @@ export function SettingsScreen() {
             )}
           </Card>
 
+          <Card title="Video passcodes · advanced">
+            <Text style={styles.passcodeIntro}>
+              The codes that unlock your hidden videos. For safety the current codes are never shown — set a
+              new one to change it.
+            </Text>
+            <PasscodeField
+              label="Locked passcode"
+              description="Opens the regular Locked section."
+              isSet={s.lockedSet}
+              mode={lockedMode}
+              value={lockedValue}
+              onMode={setLockedMode}
+              onValue={setLockedValue}
+            />
+            <PasscodeField
+              label="Vault passcode"
+              description="The second, deeper code — for videos inside the Vault."
+              isSet={s.vaultSet}
+              mode={vaultMode}
+              value={vaultValue}
+              onMode={setVaultMode}
+              onValue={setVaultValue}
+            />
+            <PasscodeField
+              label="Security passcode"
+              description="Guards this section and the other protected tabs. Remove it to leave them open."
+              isSet={s.settingsSet}
+              mode={settingsMode}
+              value={settingsValue}
+              onMode={setSettingsMode}
+              onValue={setSettingsValue}
+            />
+          </Card>
+
           <View style={styles.saveRow}>
             <Pressable onPress={save} disabled={saving} style={styles.primaryBtn}>
               {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>Save all settings</Text>}
             </Pressable>
             {saved && <Text style={styles.savedText}>Saved ✓</Text>}
           </View>
-          <Text style={styles.footnote}>Video passcodes can be managed on the web admin.</Text>
         </ScrollView>
       ) : (
         <View style={styles.center}>
@@ -223,6 +297,86 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function Label({ children }: { children: React.ReactNode }) {
   return <Text style={styles.label}>{children}</Text>;
 }
+function PasscodeField({
+  label,
+  description,
+  isSet,
+  mode,
+  value,
+  onMode,
+  onValue,
+}: {
+  label: string;
+  description: string;
+  isSet: boolean;
+  mode: PassMode;
+  value: string;
+  onMode: (m: PassMode) => void;
+  onValue: (v: string) => void;
+}) {
+  return (
+    <View style={styles.passcodeBox}>
+      <View style={styles.passcodeHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.passcodeLabel}>{label}</Text>
+          <Text style={styles.passcodeDesc}>{description}</Text>
+        </View>
+        {mode === 'keep' && (
+          <View style={[styles.passcodeBadge, isSet ? styles.passcodeBadgeOn : styles.passcodeBadgeOff]}>
+            <Text style={[styles.passcodeBadgeText, { color: isSet ? '#047857' : colors.muted }]}>
+              {isSet ? 'Set' : 'Not set'}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {mode === 'keep' ? (
+        <View style={styles.passcodeActions}>
+          <Pressable onPress={() => onMode('change')} style={styles.passcodeGhostBtn}>
+            <Text style={styles.passcodeGhostText}>{isSet ? 'Change' : 'Set a passcode'}</Text>
+          </Pressable>
+          {isSet && (
+            <Pressable onPress={() => onMode('remove')} style={styles.passcodeRemoveBtn}>
+              <Text style={styles.passcodeRemoveText}>Remove</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : mode === 'change' ? (
+        <View style={{ marginTop: 8, gap: 6 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TextInput
+              value={value}
+              onChangeText={onValue}
+              placeholder={`New ${label.toLowerCase()}`}
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.input, { flex: 1 }]}
+            />
+            <Pressable
+              onPress={() => {
+                onMode('keep');
+                onValue('');
+              }}
+              style={{ justifyContent: 'center' }}
+            >
+              <Text style={styles.passcodeCancel}>Cancel</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.passcodeNote}>Takes effect when you save.</Text>
+        </View>
+      ) : (
+        <View style={styles.passcodeActions}>
+          <Text style={styles.passcodeWillRemove}>Will be removed when you save.</Text>
+          <Pressable onPress={() => onMode('keep')}>
+            <Text style={styles.passcodeCancel}>Undo</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
     <View style={styles.toggleRow}>
@@ -275,4 +429,21 @@ const styles = StyleSheet.create({
   savedText: { color: colors.emerald, fontWeight: '700' },
   err: { color: colors.primary, fontSize: 14, textAlign: 'center' },
   footnote: { fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 },
+  passcodeIntro: { fontSize: 12, color: colors.muted, marginBottom: 2 },
+  passcodeBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, backgroundColor: colors.background },
+  passcodeHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  passcodeLabel: { fontSize: 14, fontWeight: '700', color: colors.foreground },
+  passcodeDesc: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  passcodeBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  passcodeBadgeOn: { backgroundColor: '#d1fae5' },
+  passcodeBadgeOff: { backgroundColor: colors.surfaceMuted },
+  passcodeBadgeText: { fontSize: 10, fontWeight: '800' },
+  passcodeActions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' },
+  passcodeGhostBtn: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  passcodeGhostText: { fontSize: 12, fontWeight: '700', color: colors.foreground },
+  passcodeRemoveBtn: { borderWidth: 1, borderColor: colors.primary, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  passcodeRemoveText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  passcodeCancel: { fontSize: 12, fontWeight: '600', color: colors.muted },
+  passcodeNote: { fontSize: 11, color: colors.muted },
+  passcodeWillRemove: { fontSize: 12, fontWeight: '700', color: colors.primary },
 });
