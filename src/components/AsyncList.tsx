@@ -16,6 +16,7 @@ type Props<T> = {
   renderItem: (item: T) => React.ReactElement;
   emptyText?: string;
   listHeader?: React.ReactElement;
+  listFooter?: React.ReactElement;
 };
 
 export function AsyncList<T>({
@@ -30,6 +31,7 @@ export function AsyncList<T>({
   renderItem,
   emptyText = 'Nothing here yet.',
   listHeader,
+  listFooter,
 }: Props<T>) {
   return (
     <View style={styles.root}>
@@ -50,6 +52,7 @@ export function AsyncList<T>({
           data={items ?? []}
           keyExtractor={keyExtractor}
           ListHeaderComponent={listHeader}
+          ListFooterComponent={listFooter}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
