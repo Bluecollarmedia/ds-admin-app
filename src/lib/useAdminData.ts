@@ -30,5 +30,6 @@ export function useAdminData<T>(path: string) {
     load();
   }, [load]);
 
-  return { data, loading, refreshing, error, refresh: () => load(true) };
+  // `reload` refetches quietly (no pull-to-refresh spinner).
+  return { data, loading, refreshing, error, refresh: () => load(true), reload: () => load() };
 }

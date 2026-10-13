@@ -19,3 +19,8 @@ function randomishTarget(r: number): number {
   const step = raw < 100000 ? 2500 : 5000;
   return Math.round(raw / step) * step;
 }
+
+// "12,160" — same as the web's toLocaleString("en-US"), without relying on Intl.
+export function formatViewsFull(n: number): string {
+  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}

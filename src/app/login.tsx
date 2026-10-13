@@ -1,21 +1,14 @@
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
+import { Button, Display, Input, T } from '@/components/ui';
 import { login } from '@/lib/api';
-import { colors } from '@/lib/theme';
+import { colors, fg } from '@/lib/theme';
 
+// The website's /admin/login page.
 export default function LoginScreen() {
   const router = useRouter();
   const [username, setUsername] = useState('');
@@ -27,11 +20,10 @@ export default function LoginScreen() {
     if (submitting) return;
     setSubmitting(true);
     setError('');
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       await login(username.trim(), password.trim());
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/dashboard');
+      router.replace('/reviews');
     } catch (e) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError(e instanceof Error ? e.message : 'Something went wrong.');
@@ -40,90 +32,53 @@ export default function LoginScreen() {
   }
 
   return (
-    <View style={styles.root}>
-      <SafeAreaView style={styles.safe}>
-        <KeyboardAvoidingView
-          style={styles.center}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Text style={styles.brand}>D&amp;S ADMIN</Text>
-          <Text style={styles.subtitle}>Sign in to manage the site</Text>
-
-          <View style={styles.form}>
-            <TextInput
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <KeyboardAvoidingView
+        style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 20 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={{ width: '100%', maxWidth: 384, alignSelf: 'center' }}>
+          <Display style={{ textAlign: 'center', marginBottom: 24 }}>Admin Login</Display>
+          <View style={{ gap: 16 }}>
+            <Input
               value={username}
               onChangeText={setUsername}
               placeholder="Username"
-              placeholderTextColor={colors.muted}
+              autoComplete="username"
               autoCapitalize="none"
               autoCorrect={false}
-              style={styles.input}
+              spellCheck={false}
             />
-            <TextInput
+            <Input
               value={password}
               onChangeText={setPassword}
               placeholder="Password"
-              placeholderTextColor={colors.muted}
+              autoComplete="current-password"
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
-              style={styles.input}
               onSubmitEditing={handleLogin}
               returnKeyType="go"
             />
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            <Pressable
-              onPress={handleLogin}
+            {error ? (
+              <T size="sm" color={colors.primary}>
+                {error}
+              </T>
+            ) : null}
+            <Button
+              variant="primary"
+              size="sm"
+              label={submitting ? 'Logging in...' : 'Log In'}
               disabled={submitting}
-              style={({ pressed }) => [styles.button, (pressed || submitting) && styles.buttonPressed]}
-            >
-              {submitting ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.buttonText}>Log In</Text>
-              )}
-            </Pressable>
+              onPress={handleLogin}
+              style={{ paddingHorizontal: 24, paddingVertical: 10 }}
+            />
           </View>
-
-          <Text style={styles.footnote}>You&apos;ll stay signed in on this device.</Text>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </View>
+          <T size="xs" color={fg(0.5)} style={{ marginTop: 16, textAlign: 'center' }}>
+            You&apos;ll stay logged in on this device.
+          </T>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  safe: { flex: 1 },
-  center: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
-  brand: {
-    fontSize: 40,
-    fontWeight: '800',
-    letterSpacing: 1,
-    color: colors.foreground,
-    textAlign: 'center',
-  },
-  subtitle: { marginTop: 6, fontSize: 15, color: colors.muted, textAlign: 'center' },
-  form: { marginTop: 32, gap: 14 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: colors.foreground,
-  },
-  error: { color: colors.primary, fontSize: 14, textAlign: 'center' },
-  button: {
-    marginTop: 4,
-    backgroundColor: colors.primary,
-    borderRadius: 999,
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  buttonPressed: { opacity: 0.85 },
-  buttonText: { color: colors.white, fontSize: 16, fontWeight: '700' },
-  footnote: { marginTop: 20, fontSize: 12, color: colors.muted, textAlign: 'center' },
-});
