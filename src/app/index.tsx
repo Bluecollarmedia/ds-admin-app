@@ -25,5 +25,5 @@ export default function Index() {
     );
   }
 
-  return <Redirect href={signedIn ? '/dashboard' : '/login'} />;
+  return <Redirect href={signedIn ? '/reviews' : '/login'} />;
 }

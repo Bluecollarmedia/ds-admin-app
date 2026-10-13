@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import MapView, { Marker, type MapPressEvent, type MarkerDragStartEndEvent } from 'react-native-maps';
+import Svg, { Circle, Path } from 'react-native-svg';
 
+import { T } from './ui';
 import { adminFetch } from '@/lib/api';
-import { colors } from '@/lib/theme';
+import { colors, fg, fonts } from '@/lib/theme';
 
 type Props = {
   lat?: number;
@@ -136,14 +138,21 @@ export function LocationPicker({ lat, lng, address, onChange }: Props) {
         <TextInput
           value={query}
           onChangeText={onType}
-          placeholder="Type a store name/address, or paste a Google Maps link"
-          placeholderTextColor={colors.muted}
+          onSubmitEditing={() => {
+            if (linkMode) resolveLink();
+            else if (suggestions[0]) pick(suggestions[0]);
+          }}
+          placeholder="Type a store name or address, or paste a Google Maps link"
+          placeholderTextColor={fg(0.4)}
           style={styles.input}
           autoCapitalize="none"
+          returnKeyType="search"
         />
         {linkMode && (
-          <Pressable onPress={resolveLink} disabled={busy} style={styles.useLinkBtn}>
-            {busy ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.useLinkText}>Use link</Text>}
+          <Pressable onPress={resolveLink} disabled={busy} style={[styles.useLinkBtn, busy && { opacity: 0.6 }]}>
+            <T size="sm" weight="semibold" color={colors.white}>
+              {busy ? '…' : 'Use link'}
+            </T>
           </Pressable>
         )}
       </View>
@@ -152,9 +161,13 @@ export function LocationPicker({ lat, lng, address, onChange }: Props) {
         <View style={styles.suggestBox}>
           {suggestions.map((s, i) => (
             <Pressable key={i} onPress={() => pick(s)} style={styles.suggestRow}>
-              <Text style={styles.suggestText} numberOfLines={1}>
-                📍 {s.label}
-              </Text>
+              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth={2} style={{ marginTop: 2 }}>
+                <Path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z" strokeLinecap="round" strokeLinejoin="round" />
+                <Circle cx={12} cy={11} r={2.5} />
+              </Svg>
+              <T size="sm" style={{ flex: 1 }}>
+                {s.label}
+              </T>
             </Pressable>
           ))}
         </View>
@@ -189,16 +202,24 @@ export function LocationPicker({ lat, lng, address, onChange }: Props) {
       </View>
 
       <View style={styles.footRow}>
-        <Text style={styles.footNote}>
-          {hasPin ? `Pinned: ${lat!.toFixed(5)}, ${lng!.toFixed(5)}` : 'No location set — search, or tap/drag the map.'}
-        </Text>
+        <T size="xs" color={fg(0.55)} style={{ flex: 1 }}>
+          {hasPin
+            ? `Pinned: ${lat!.toFixed(5)}, ${lng!.toFixed(5)} — drag the pin to fine-tune`
+            : 'No location set — type to search, or drag/tap the map.'}
+        </T>
         {hasPin && (
           <Pressable onPress={clear} hitSlop={8}>
-            <Text style={styles.clear}>Clear</Text>
+            <T size="xs" weight="semibold" color={colors.primary}>
+              Clear
+            </T>
           </Pressable>
         )}
       </View>
-      {status && <Text style={styles.status}>{status}</Text>}
+      {status && (
+        <T size="xs" color={fg(0.5)}>
+          {status}
+        </T>
+      )}
     </View>
   );
 }
@@ -207,24 +228,32 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', gap: 8 },
   input: {
     flex: 1,
+    minWidth: 0,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 8,
     fontSize: 14,
+    fontFamily: fonts.regular,
     color: colors.foreground,
     backgroundColor: colors.surface,
   },
-  useLinkBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' },
-  useLinkText: { color: colors.white, fontWeight: '700', fontSize: 13 },
-  suggestBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, overflow: 'hidden' },
-  suggestRow: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  suggestText: { fontSize: 13, color: colors.foreground },
-  mapWrap: { height: 200, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
+  useLinkBtn: { backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' },
+  suggestBox: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  suggestRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  mapWrap: { height: 224, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
   map: { flex: 1 },
-  footRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  footNote: { fontSize: 12, color: colors.muted, flex: 1 },
-  clear: { fontSize: 12, fontWeight: '700', color: colors.primary },
-  status: { fontSize: 12, color: colors.muted },
+  footRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
 });

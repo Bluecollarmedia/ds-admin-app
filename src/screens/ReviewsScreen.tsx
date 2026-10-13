@@ -1,18 +1,23 @@
-import { useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Pressable } from 'react-native-gesture-handler';
+import { useCallback, useRef, useState } from 'react';
+import { Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
-import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useRouter } from 'expo-router';
+import Svg, { Path } from 'react-native-svg';
 
-import { Header } from '@/components/Header';
 import { BackfillDurations } from '@/components/BackfillDurations';
+import { Page } from '@/components/Page';
+import { Button, Card, Display, Divider, ErrorText, Input, Loading, Pill, T } from '@/components/ui';
 import { adminFetch } from '@/lib/api';
 import { useAdminData } from '@/lib/useAdminData';
-import { suggestedClimbTarget, randomClimbTarget } from '@/lib/viewFormat';
-import { colors } from '@/lib/theme';
+import { formatViewsFull, randomClimbTarget, suggestedClimbTarget } from '@/lib/viewFormat';
+import { accentA, colors, fg, tw } from '@/lib/theme';
 
-type Review = {
+type ViewSetting =
+  | { mode: 'fixed'; value: number }
+  | { mode: 'auto'; start: string; startViews: number; target: number };
+
+export type AdminReview = {
   slug: string;
   title: string;
   store: string;
@@ -21,349 +26,455 @@ type Review = {
   categories: string[];
   status: 'published' | 'draft' | 'locked' | 'vault';
   videoKey?: string;
+  thumbnailKey?: string;
   videoUrl?: string | null;
   durationSeconds?: number;
   thumbnailUrl: string | null;
+  secondReviewer?: string;
+  secondReviewerVideoUrl?: string | null;
   realViews: number;
   displayViews?: number;
+  viewSetting?: ViewSetting | null;
+  excludeFromRankings?: boolean;
   price?: string;
   description: string;
   reviewer: string;
 };
 
-const STATUS_LABEL: Record<Review['status'], string> = {
-  published: 'Published',
-  draft: 'Draft',
-  locked: 'Locked',
-  vault: 'Vault',
-};
+// The website's /admin page: "Admin · Reviews" + "Add New Review", then one
+// card per review (AdminReviewCard).
+export function ReviewsScreen() {
+  const router = useRouter();
+  const { data, loading, refreshing, error, refresh, reload } = useAdminData<{ reviews: AdminReview[] }>(
+    '/api/admin/reviews'
+  );
+  // Coming back from Add/Edit Review: pick up the change.
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedOnce.current) reload();
+      focusedOnce.current = true;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+  );
+  const reviews = data?.reviews ?? [];
 
-function StatusBadge({ status }: { status: Review['status'] }) {
-  const bg =
-    status === 'published' ? '#d1fae5' : status === 'locked' ? '#fef3c7' : status === 'vault' ? '#ede9fe' : '#eee6da';
-  const fg =
-    status === 'published' ? '#047857' : status === 'locked' ? '#b45309' : status === 'vault' ? '#6d28d9' : '#6b625a';
+  const missingDurations = reviews
+    .filter((r) => r.videoUrl && typeof r.durationSeconds !== 'number')
+    .map((r) => ({ slug: r.slug, videoUrl: r.videoUrl! }));
+
   return (
-    <View style={[styles.badge, { backgroundColor: bg }]}>
-      <Text style={[styles.badgeText, { color: fg }]}>{STATUS_LABEL[status]}</Text>
-    </View>
+    <Page refreshing={refreshing} onRefresh={refresh}>
+      <View style={styles.heading}>
+        <Display>Admin · Reviews</Display>
+        <Button
+          variant="primary"
+          size="sm"
+          style={{ paddingHorizontal: 20, paddingVertical: 8 }}
+          label="+ Add New Review"
+          onPress={() => router.push('/new-review')}
+        />
+      </View>
+
+      <View style={{ marginTop: 32 }}>
+        <BackfillDurations items={missingDurations} />
+      </View>
+
+      {loading ? (
+        <Loading />
+      ) : error ? (
+        <ErrorText message={error} onRetry={refresh} />
+      ) : (
+        <View style={{ marginTop: 8, gap: 16 }}>
+          {reviews.map((r) => (
+            <ReviewCard key={r.slug} review={r} onChanged={refresh} />
+          ))}
+          {reviews.length === 0 && (
+            <T color={fg(0.6)} style={{ marginTop: 32, textAlign: 'center' }} size="base">
+              No reviews yet — tap &quot;Add New Review&quot; to create the first one.
+            </T>
+          )}
+        </View>
+      )}
+    </Page>
   );
 }
 
-export function ReviewsScreen() {
+function ReviewCard({ review, onChanged }: { review: AdminReview; onChanged: () => void }) {
   const router = useRouter();
-  const { data, loading, refreshing, error, refresh } = useAdminData<{ reviews: Review[] }>(
-    '/api/admin/reviews'
+  const views = review.realViews ?? 0;
+  const publicViews = review.displayViews ?? 0;
+  const viewSetting = review.viewSetting ?? null;
+  const [busy, setBusy] = useState(false);
+  const [editingViews, setEditingViews] = useState(false);
+  const [viewsInput, setViewsInput] = useState(String(publicViews));
+  const [climbTarget, setClimbTarget] = useState(
+    String(viewSetting?.mode === 'auto' ? viewSetting.target : suggestedClimbTarget(review.slug))
   );
-  const [busy, setBusy] = useState<string | null>(null);
-  const [editingViews, setEditingViews] = useState<string | null>(null);
 
-  async function togglePublish(r: Review) {
-    setBusy(r.slug);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  async function send(path: string, init: RequestInit, failMsg: string) {
+    setBusy(true);
     try {
-      const res = await adminFetch(`/api/admin/reviews/${r.slug}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          title: r.title,
-          store: r.store,
-          city: r.city,
-          categories: r.categories,
-          rating: r.rating,
-          price: r.price,
-          description: r.description,
-          reviewer: r.reviewer,
-          videoKey: r.videoKey,
-          status: r.status === 'published' ? 'draft' : 'published',
-        }),
-      });
+      const res = await adminFetch(path, init);
       if (!res.ok) {
         const d = await res.json().catch(() => null);
-        Alert.alert('Could not update', d?.error ?? 'Try again.');
-      } else {
-        refresh();
+        Alert.alert(d?.error ?? failMsg);
+        return false;
       }
+      return true;
+    } catch {
+      Alert.alert(failMsg);
+      return false;
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
-  function confirmDelete(r: Review) {
-    Alert.alert('Delete review', `Delete "${r.title}"? This can't be undone.`, [
+  async function postViews(payload: Record<string, unknown>) {
+    const ok = await send(
+      '/api/admin/views',
+      { method: 'POST', body: JSON.stringify({ slug: review.slug, ...payload }) },
+      "Couldn't update the view count."
+    );
+    if (ok) {
+      setEditingViews(false);
+      onChanged();
+    }
+  }
+
+  async function togglePublish() {
+    const ok = await send(
+      `/api/admin/reviews/${review.slug}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          title: review.title,
+          store: review.store,
+          city: review.city,
+          categories: review.categories,
+          rating: review.rating,
+          price: review.price,
+          description: review.description,
+          reviewer: review.reviewer,
+          videoKey: review.videoKey,
+          thumbnailKey: review.thumbnailKey,
+          status: review.status === 'published' ? 'draft' : 'published',
+        }),
+      },
+      "Couldn't update."
+    );
+    if (ok) onChanged();
+  }
+
+  function handleDelete() {
+    Alert.alert(`Delete "${review.title}"?`, "This can't be undone.", [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          setBusy(r.slug);
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          try {
-            const res = await adminFetch(`/api/admin/reviews/${r.slug}`, { method: 'DELETE' });
-            if (!res.ok) {
-              const d = await res.json().catch(() => null);
-              Alert.alert('Could not delete', d?.error ?? 'Try again.');
-            } else {
-              refresh();
-            }
-          } finally {
-            setBusy(null);
-          }
+          const ok = await send(`/api/admin/reviews/${review.slug}`, { method: 'DELETE' }, "Couldn't delete.");
+          if (ok) onChanged();
         },
       },
     ]);
   }
 
-  async function postViews(slug: string, body: Record<string, unknown>) {
-    setBusy(slug);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try {
-      const res = await adminFetch('/api/admin/views', { method: 'POST', body: JSON.stringify({ slug, ...body }) });
-      if (!res.ok) {
-        const d = await res.json().catch(() => null);
-        Alert.alert('Could not update views', d?.error ?? 'Try again.');
-      } else {
-        setEditingViews(null);
-        refresh();
-      }
-    } finally {
-      setBusy(null);
-    }
+  async function toggleRankingExclusion() {
+    const ok = await send(
+      `/api/admin/reviews/${review.slug}/toggle-ranking`,
+      { method: 'PATCH' },
+      "Couldn't update ranking exclusion."
+    );
+    if (ok) onChanged();
   }
 
-  const missingDurations = (data?.reviews ?? [])
-    .filter((r) => r.videoUrl && typeof r.durationSeconds !== 'number')
-    .map((r) => ({ slug: r.slug, videoUrl: r.videoUrl! }));
+  const isProtected = review.status === 'locked' || review.status === 'vault';
+  const videoUrl = review.videoUrl ?? null;
+  const secondVideoUrl = review.secondReviewerVideoUrl ?? null;
+  const editHref = `/edit-review/${review.slug}` as const;
+
+  const statusPill =
+    review.status === 'published'
+      ? { label: 'Published', bg: tw.emerald100, color: tw.emerald700 }
+      : review.status === 'locked'
+        ? { label: 'Locked', bg: tw.amber100, color: tw.amber700 }
+        : review.status === 'vault'
+          ? { label: 'Vault', bg: tw.violet100, color: tw.violet700 }
+          : { label: 'Draft', bg: fg(0.1), color: fg(0.6) };
 
   return (
-    <View style={styles.root}>
-      <Header
-        title="Reviews"
-        right={
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push('/new-review');
-            }}
-            hitSlop={10}
-          >
-            <Text style={styles.newBtn}>+ New</Text>
-          </Pressable>
-        }
-      />
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} />
+    <Card shadow>
+      <View style={styles.top}>
+        <View style={styles.thumb}>
+          <LinearGradient
+            colors={[colors.primary, colors.accent]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          {review.thumbnailUrl && (
+            <Image source={{ uri: review.thumbnailUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          )}
         </View>
-      ) : error ? (
-        <View style={styles.center}>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable onPress={refresh} style={styles.retry}>
-            <Text style={styles.retryText}>Retry</Text>
-          </Pressable>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Display size="lg" numberOfLines={1}>
+            {review.title}
+          </Display>
+          <T size="xs" color={fg(0.6)} numberOfLines={1}>
+            {review.store} · {review.city} · {review.rating}/10
+          </T>
+          <T size="xs" color={fg(0.5)} numberOfLines={1} style={{ marginTop: 4 }}>
+            {review.categories.join(', ')}
+          </T>
+          <View style={styles.pills}>
+            <Pill {...statusPill} />
+            <Pill
+              label={review.videoKey ? 'Video uploaded' : 'No video'}
+              bg={review.videoKey ? tw.emerald100 : fg(0.1)}
+              color={review.videoKey ? tw.emerald700 : fg(0.5)}
+            />
+            {review.excludeFromRankings && (
+              <Pill label="Excluded from rankings" bg={tw.red100} color={tw.red700} />
+            )}
+          </View>
         </View>
-      ) : (
-        <FlatList
-          data={data?.reviews ?? []}
-          keyExtractor={(r) => r.slug}
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
-          ListHeaderComponent={<BackfillDurations items={missingDurations} />}
-          ListEmptyComponent={<Text style={styles.empty}>No reviews yet.</Text>}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <View style={styles.row}>
-                <Image
-                  source={item.thumbnailUrl ? { uri: item.thumbnailUrl } : undefined}
-                  style={styles.thumb}
-                  contentFit="cover"
-                  transition={150}
-                />
-                <View style={styles.info}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  <Text style={styles.meta} numberOfLines={1}>
-                    {item.store} · {item.city} · {item.rating}/10
-                  </Text>
-                  <View style={styles.badges}>
-                    <StatusBadge status={item.status} />
-                    <View style={[styles.badge, { backgroundColor: item.videoKey ? '#d1fae5' : '#eee6da' }]}>
-                      <Text style={[styles.badgeText, { color: item.videoKey ? '#047857' : '#6b625a' }]}>
-                        {item.videoKey ? 'Video' : 'No video'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
+      </View>
 
-              {editingViews === item.slug ? (
-                <ViewsEditor
-                  review={item}
-                  busy={busy === item.slug}
-                  onCancel={() => setEditingViews(null)}
-                  onSave={(body) => postViews(item.slug, body)}
+      {/* View counts — real (actual visitors) vs. the padded number the public sees. */}
+      <Divider />
+      <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+        {editingViews ? (
+          <View style={{ gap: 16 }}>
+            <View style={{ gap: 8 }}>
+              <T size="xs" weight="semibold" color={fg(0.7)}>
+                Set an exact number
+              </T>
+              <View style={styles.wrapRow}>
+                <Input
+                  value={viewsInput}
+                  onChangeText={setViewsInput}
+                  keyboardType="number-pad"
+                  style={{ width: 144, paddingVertical: 6 }}
                 />
-              ) : (
-                <Pressable onPress={() => setEditingViews(item.slug)} style={styles.viewsRow}>
-                  <Text style={styles.views}>
-                    {item.realViews.toLocaleString()} real · {(item.displayViews ?? 0).toLocaleString()} shown
-                  </Text>
-                  <Text style={styles.editViews}>Edit views</Text>
-                </Pressable>
-              )}
-
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={() => router.push(`/edit-review/${item.slug}`)}
-                  style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
-                >
-                  <Text style={styles.actionText}>Edit</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => togglePublish(item)}
-                  disabled={busy === item.slug || item.status === 'locked' || item.status === 'vault'}
-                  style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
-                >
-                  <Text style={styles.actionText}>
-                    {item.status === 'published' ? 'Make Private' : 'Publish'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => confirmDelete(item)}
-                  disabled={busy === item.slug}
-                  style={({ pressed }) => [styles.actionBtn, styles.deleteBtn, pressed && styles.pressed]}
-                >
-                  <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
-                </Pressable>
+                <Button
+                  variant="primary"
+                  label="Save number"
+                  style={{ paddingVertical: 6 }}
+                  disabled={busy}
+                  onPress={() => postViews({ action: 'fixed', value: Number(viewsInput) || 0 })}
+                />
               </View>
             </View>
+
+            <View style={styles.editorSection}>
+              <T size="xs" weight="semibold" color={fg(0.7)}>
+                Auto-climb to a target (like YouTube)
+              </T>
+              <T size="xs11" color={fg(0.5)}>
+                Climbs fast at first, then slows down, maxing out at the target. It keeps going on its
+                own — no need to touch it again. Each video starts with its own target so they don&apos;t
+                all land on the same number.
+              </T>
+              <View style={styles.wrapRow}>
+                <T size="xs" weight="semibold" color={fg(0.6)}>
+                  Max out at
+                </T>
+                <Input
+                  value={climbTarget}
+                  onChangeText={setClimbTarget}
+                  keyboardType="number-pad"
+                  style={{ width: 112, paddingVertical: 6 }}
+                />
+                <Button
+                  label="🎲 Random"
+                  style={{ paddingHorizontal: 12, paddingVertical: 6 }}
+                  onPress={() => setClimbTarget(String(randomClimbTarget()))}
+                />
+                <Button
+                  variant="accent"
+                  style={{ paddingVertical: 6 }}
+                  disabled={busy}
+                  label={viewSetting?.mode === 'auto' ? 'Restart climb' : 'Start climbing'}
+                  onPress={() =>
+                    postViews({ action: 'climb', from: publicViews, target: Number(climbTarget) || 0 })
+                  }
+                />
+              </View>
+            </View>
+
+            <View style={[styles.wrapRow, styles.editorFooter]}>
+              <Button
+                label="Reset to automatic"
+                style={{ paddingVertical: 6 }}
+                disabled={busy}
+                onPress={() => postViews({ action: 'reset' })}
+              />
+              <Pressable
+                disabled={busy}
+                onPress={() => {
+                  setViewsInput(String(publicViews));
+                  setEditingViews(false);
+                }}
+              >
+                <T size="xs" weight="semibold" color={fg(0.5)}>
+                  Cancel
+                </T>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.viewsRow}>
+            <View style={styles.viewsCounts}>
+              <T size="xs" color={fg(0.7)}>
+                <T size="xs" weight="semibold">
+                  {formatViewsFull(views)}
+                </T>{' '}
+                real {views === 1 ? 'view' : 'views'}
+              </T>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <T size="xs" color={fg(0.7)}>
+                  <T size="xs" weight="semibold">
+                    {formatViewsFull(publicViews)}
+                  </T>{' '}
+                  shown publicly
+                </T>
+                {viewSetting?.mode === 'fixed' && <SmallTag label="custom" />}
+                {viewSetting?.mode === 'auto' && (
+                  <SmallTag label={`climbing → ${formatViewsFull(viewSetting.target)}`} />
+                )}
+              </View>
+            </View>
+            <Pressable
+              hitSlop={8}
+              onPress={() => {
+                setViewsInput(String(publicViews));
+                setEditingViews(true);
+              }}
+            >
+              <T size="xs" weight="semibold" color={colors.primary}>
+                Edit views
+              </T>
+            </Pressable>
+          </View>
+        )}
+      </View>
+
+      <Divider />
+      <View style={{ padding: 12, gap: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Button label="Edit" style={styles.gridBtn} onPress={() => router.push(editHref)} />
+          {isProtected ? (
+            <Button label="Change" style={styles.gridBtn} onPress={() => router.push(editHref)} />
+          ) : (
+            <Button
+              label={review.status === 'published' ? 'Make Private' : 'Publish'}
+              style={styles.gridBtn}
+              disabled={busy}
+              onPress={togglePublish}
+            />
           )}
+          <Button
+            label="Delete"
+            variant="outlinePrimary"
+            style={styles.gridBtn}
+            disabled={busy}
+            onPress={handleDelete}
+          />
+        </View>
+        <Button
+          label={review.excludeFromRankings ? '✓ Excluded from rankings' : 'Include in rankings'}
+          style={[
+            { paddingVertical: 8 },
+            review.excludeFromRankings && { borderColor: tw.red300, backgroundColor: tw.red50 },
+          ]}
+          color={review.excludeFromRankings ? tw.red700 : undefined}
+          disabled={busy}
+          onPress={toggleRankingExclusion}
         />
+      </View>
+
+      {(videoUrl || secondVideoUrl) && (
+        <>
+          <Divider />
+          <View style={[styles.wrapRow, { paddingHorizontal: 12, paddingVertical: 10 }]}>
+            <T size="xs" weight="semibold" color={fg(0.4)}>
+              Download:
+            </T>
+            {videoUrl && (
+              <Button
+                label={secondVideoUrl ? `${review.reviewer}'s video` : 'Video'}
+                style={styles.downloadBtn}
+                icon={<DownloadIcon />}
+                onPress={() => Linking.openURL(videoUrl)}
+              />
+            )}
+            {secondVideoUrl && (
+              <Button
+                label={`${review.secondReviewer}'s video`}
+                style={styles.downloadBtn}
+                icon={<DownloadIcon />}
+                onPress={() => Linking.openURL(secondVideoUrl)}
+              />
+            )}
+          </View>
+        </>
       )}
+    </Card>
+  );
+}
+
+function SmallTag({ label }: { label: string }) {
+  return (
+    <View style={styles.smallTag}>
+      <T size="xs10" weight="semibold" color={colors.accent}>
+        {label}
+      </T>
     </View>
   );
 }
 
-function ViewsEditor({
-  review,
-  busy,
-  onSave,
-  onCancel,
-}: {
-  review: Review;
-  busy: boolean;
-  onSave: (body: Record<string, unknown>) => void;
-  onCancel: () => void;
-}) {
-  const [fixedValue, setFixedValue] = useState(String(review.displayViews ?? 0));
-  const [target, setTarget] = useState(String(suggestedClimbTarget(review.slug)));
-
+function DownloadIcon() {
   return (
-    <View style={styles.editorBox}>
-      <Text style={styles.editorLabel}>Set an exact number</Text>
-      <View style={styles.editorRow}>
-        <TextInput
-          value={fixedValue}
-          onChangeText={setFixedValue}
-          keyboardType="number-pad"
-          style={styles.editorInput}
-        />
-        <Pressable
-          onPress={() => onSave({ action: 'fixed', value: Number(fixedValue) || 0 })}
-          disabled={busy}
-          style={styles.editorSaveBtn}
-        >
-          <Text style={styles.editorSaveText}>Save</Text>
-        </Pressable>
-      </View>
-
-      <Text style={[styles.editorLabel, { marginTop: 10 }]}>Auto-climb to a target</Text>
-      <View style={styles.editorRow}>
-        <TextInput value={target} onChangeText={setTarget} keyboardType="number-pad" style={styles.editorInput} />
-        <Pressable onPress={() => setTarget(String(randomClimbTarget()))} style={styles.diceBtn}>
-          <Text style={styles.diceText}>🎲</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => onSave({ action: 'climb', from: review.displayViews ?? 0, target: Number(target) || 0 })}
-          disabled={busy}
-          style={[styles.editorSaveBtn, { backgroundColor: colors.accent }]}
-        >
-          <Text style={styles.editorSaveText}>Climb</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.editorFooter}>
-        <Pressable onPress={() => onSave({ action: 'reset' })} disabled={busy}>
-          <Text style={styles.editorReset}>Reset to automatic</Text>
-        </Pressable>
-        <Pressable onPress={onCancel}>
-          <Text style={styles.editorCancel}>Cancel</Text>
-        </Pressable>
-      </View>
-    </View>
+    <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={fg(0.7)} strokeWidth={2}>
+      <Path
+        d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  error: { color: colors.primary, fontSize: 14 },
-  retry: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.primary },
-  retryText: { color: colors.white, fontWeight: '700' },
-  list: { padding: 16, gap: 14 },
-  empty: { textAlign: 'center', color: colors.muted, marginTop: 40 },
-  card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 18,
-    padding: 14,
-    gap: 10,
-  },
-  row: { flexDirection: 'row', gap: 12 },
-  thumb: { width: 96, height: 58, borderRadius: 10, backgroundColor: colors.surfaceMuted },
-  info: { flex: 1, gap: 3 },
-  title: { fontSize: 16, fontWeight: '700', color: colors.foreground },
-  meta: { fontSize: 12, color: colors.muted },
-  badges: { flexDirection: 'row', gap: 6, marginTop: 4 },
-  badge: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3 },
-  badgeText: { fontSize: 11, fontWeight: '700' },
-  viewsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  views: { fontSize: 12, color: colors.muted },
-  editViews: { fontSize: 12, fontWeight: '700', color: colors.primary },
-  editorBox: { backgroundColor: colors.surfaceMuted, borderRadius: 12, padding: 12 },
-  editorLabel: { fontSize: 12, fontWeight: '700', color: colors.foreground },
-  editorRow: { flexDirection: 'row', gap: 8, marginTop: 6, alignItems: 'center' },
-  editorInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: colors.surface,
-    fontSize: 14,
-    color: colors.foreground,
-  },
-  editorSaveBtn: { backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
-  editorSaveText: { color: colors.white, fontSize: 12, fontWeight: '700' },
-  diceBtn: { paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8, backgroundColor: colors.surface },
-  diceText: { fontSize: 14 },
-  editorFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  editorReset: { fontSize: 12, fontWeight: '700', color: colors.foreground },
-  editorCancel: { fontSize: 12, fontWeight: '600', color: colors.muted },
-  actions: { flexDirection: 'row', gap: 8 },
-  actionBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 999,
-    paddingVertical: 9,
+  heading: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
   },
-  deleteBtn: { borderColor: colors.primary },
-  actionText: { fontSize: 13, fontWeight: '700', color: colors.foreground },
-  deleteText: { color: colors.primary },
-  pressed: { opacity: 0.7 },
-  newBtn: { fontSize: 15, fontWeight: '800', color: colors.primary },
+  top: { flexDirection: 'row', gap: 12, padding: 16 },
+  thumb: { width: 112, height: 64, borderRadius: 8, overflow: 'hidden' },
+  pills: { marginTop: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  wrapRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  editorSection: { gap: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+  editorFooter: { gap: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+  viewsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  viewsCounts: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 16, rowGap: 4, flexShrink: 1 },
+  smallTag: {
+    marginLeft: 4,
+    borderRadius: 999,
+    backgroundColor: accentA(0.1),
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  gridBtn: { flex: 1, paddingHorizontal: 0, paddingVertical: 8 },
+  downloadBtn: { paddingHorizontal: 12, paddingVertical: 4 },
 });

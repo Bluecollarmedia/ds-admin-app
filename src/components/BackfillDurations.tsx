@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { Pressable } from 'react-native-gesture-handler';
+import { View } from 'react-native';
 import { createVideoPlayer } from 'expo-video';
 
 import { adminFetch } from '@/lib/api';
-import { colors } from '@/lib/theme';
+import { Button, Card, T } from '@/components/ui';
+import { fg } from '@/lib/theme';
 
 type Item = { slug: string; videoUrl: string };
 
@@ -76,36 +76,28 @@ export function BackfillDurations({ items }: { items: Item[] }) {
   if (items.length === 0) return null;
 
   return (
-    <View style={styles.box}>
-      <Text style={styles.title}>
+    <Card style={{ padding: 16, marginBottom: 24 }}>
+      <T size="sm" weight="semibold">
         {items.length} video{items.length === 1 ? '' : 's'} missing a duration
-      </Text>
-      <Text style={styles.sub}>Measure and save each one&apos;s length so the cards show the time.</Text>
-      <View style={styles.row}>
-        <Pressable onPress={run} disabled={running} style={styles.btn}>
-          {running ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <ActivityIndicator color={colors.white} size="small" />
-              <Text style={styles.btnText}>
-                Working… {done}/{items.length}
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.btnText}>{finished ? 'Run again' : 'Fill in all durations'}</Text>
-          )}
-        </Pressable>
-        {finished && <Text style={styles.result}>Filled {filled}. Pull to refresh.</Text>}
+      </T>
+      <T size="xs" color={fg(0.55)} style={{ marginTop: 2 }}>
+        Measure and save each one&apos;s length so the cards show the time.
+      </T>
+      <View style={{ marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+        <Button
+          variant="primary"
+          size="sm"
+          style={{ paddingHorizontal: 16, paddingVertical: 8 }}
+          onPress={run}
+          disabled={running}
+          label={running ? `Working… ${done}/${items.length}` : finished ? 'Run again' : 'Fill in all durations'}
+        />
+        {finished && (
+          <T size="sm" color={fg(0.7)}>
+            Filled {filled}. Pull down to refresh.
+          </T>
+        )}
       </View>
-    </View>
+    </Card>
   );
 }
-
-const styles = StyleSheet.create({
-  box: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 14, marginBottom: 14, gap: 4 },
-  title: { fontSize: 14, fontWeight: '700', color: colors.foreground },
-  sub: { fontSize: 12, color: colors.muted },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' },
-  btn: { backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9 },
-  btnText: { color: colors.white, fontSize: 13, fontWeight: '700' },
-  result: { fontSize: 12, color: colors.muted },
-});
